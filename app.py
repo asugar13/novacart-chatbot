@@ -1,0 +1,284 @@
+"""
+app.py  –  NovaCart Customer Support Chatbot
+Run with:  streamlit run app.py
+Requires:  python ingest.py  to have been run first.
+"""
+
+import os
+import ollama
+import streamlit as st
+
+from rag import (
+    retrieve,
+    is_relevant,
+    format_context,
+    extract_shipment_id,
+    lookup_shipment,
+    SOURCE_LABELS,
+)
+
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="NovaCart Support",
+    page_icon="🛒",
+    layout="centered",
+)
+
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Brand header */
+.brand-header {
+    background: linear-gradient(135deg, #0052cc 0%, #00a3e0 100%);
+    color: white;
+    padding: 18px 24px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.brand-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
+.brand-sub   { font-size: 0.9rem; opacity: 0.85; margin: 0; }
+
+/* Source badge */
+.src-badge {
+    display: inline-block;
+    background: #e8f4fd;
+    color: #0052cc;
+    border: 1px solid #b3d7f5;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    margin: 2px 3px 2px 0;
+    font-weight: 600;
+}
+
+/* Shipment card */
+.ship-card {
+    background: #f0faf5;
+    border-left: 4px solid #00875a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    font-size: 0.88rem;
+}
+.ship-status {
+    font-size: 1.0rem;
+    font-weight: 700;
+    color: #00875a;
+}
+
+/* Off-topic notice */
+.offtrack {
+    background: #fff8e1;
+    border-left: 4px solid #f4a900;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    font-size: 0.9rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+AVAILABLE_MODELS = ["qwen2.5:3b", "qwen2.5:7b", "qwen2.5:14b"]
+
+SYSTEM_PROMPT = """You are Nova, the friendly and knowledgeable customer support assistant for NovaCart Marketplace, a digital marketplace operating across the Middle East.
+
+Your role is to help customers with questions about:
+- Order tracking and shipment status
+- Delivery options, timelines, and rescheduling
+- Returns, refunds, and exchanges
+- Payment methods and NovaWallet
+- NovaPlus membership
+- Seller marketplace policies
+- Product categories and purchasing policies
+- Customer account and checkout questions
+
+Guidelines:
+- Be friendly, concise, and helpful.
+- Base your answers ONLY on the context provided below.
+- When a shipment ID is involved, use the exact status data provided.
+- If you are unsure about something, say so honestly and suggest the customer contact live support.
+- Do NOT answer questions unrelated to NovaCart products, services, or policies.
+- Never reveal that you are powered by an AI language model unless directly asked.
+- Do not invent shipment statuses, refund timelines, or policies not in the context.
+"""
+
+OFF_TOPIC_RESPONSE = """I appreciate you reaching out! I'm Nova, NovaCart's support assistant, and I'm specifically here to help you with topics related to NovaCart Marketplace, such as:
+
+- 📦 **Order tracking and shipment status**
+- 🚚 **Delivery options and timelines**
+- 🔄 **Returns, refunds, and exchanges**
+- 💳 **Payment methods and NovaWallet**
+- 🌟 **NovaPlus membership**
+- 🛒 **Products, sellers, and policies**
+
+I'm not able to help with topics outside of NovaCart. Please feel free to ask me anything about your orders or our services!"""
+
+
+# ── Session state ─────────────────────────────────────────────────────────────
+if "history" not in st.session_state:
+    st.session_state.history = []        # [{role, content}]
+if "model" not in st.session_state:
+    st.session_state.model = AVAILABLE_MODELS[1]   # default 7b
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/shopping-cart.png", width=60)
+    st.title("NovaCart Support")
+    st.caption("Powered by Qwen + RAG")
+
+    st.divider()
+
+    st.subheader("Model")
+    selected_model = st.selectbox(
+        "Qwen model",
+        AVAILABLE_MODELS,
+        index=AVAILABLE_MODELS.index(st.session_state.model),
+        label_visibility="collapsed",
+    )
+    st.session_state.model = selected_model
+
+    st.divider()
+    st.subheader("Topics I can help with")
+    topics = [
+        "📦 Order tracking",
+        "🚚 Delivery & shipping",
+        "🔄 Returns & refunds",
+        "💳 Payments",
+        "🌟 NovaPlus membership",
+        "🛒 Products & sellers",
+        "👤 Account & checkout",
+    ]
+    for t in topics:
+        st.markdown(f"- {t}")
+
+    st.divider()
+    if st.button("Clear conversation", use_container_width=True):
+        st.session_state.history = []
+        st.rerun()
+
+    st.caption(f"Model: `{st.session_state.model}`")
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="brand-header">
+  <div>
+    <p class="brand-title">🛒 NovaCart Support</p>
+    <p class="brand-sub">Hi! I'm Nova — ask me about your orders, deliveries, returns, and more.</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ── Chat history display ──────────────────────────────────────────────────────
+for msg in st.session_state.history:
+    with st.chat_message(msg["role"], avatar="🛒" if msg["role"] == "assistant" else "🧑"):
+        st.markdown(msg["content"], unsafe_allow_html=True)
+
+
+# ── Chat input ────────────────────────────────────────────────────────────────
+user_input = st.chat_input("Ask me about your order, delivery, return policy...")
+
+if user_input:
+    user_input = user_input.strip()
+
+    # Display user message
+    with st.chat_message("user", avatar="🧑"):
+        st.markdown(user_input)
+    st.session_state.history.append({"role": "user", "content": user_input})
+
+    with st.chat_message("assistant", avatar="🛒"):
+        response_placeholder = st.empty()
+        sources_placeholder  = st.empty()
+
+        # ── Step 1: Shipment ID exact lookup ─────────────────────────────────
+        shipment_id  = extract_shipment_id(user_input)
+        shipment_rec = None
+        if shipment_id:
+            shipment_rec = lookup_shipment(shipment_id)
+
+        # ── Step 2: Semantic retrieval ────────────────────────────────────────
+        chunks = retrieve(user_input, k=5)
+
+        # ── Step 3: Relevance gate ────────────────────────────────────────────
+        if not is_relevant(user_input, chunks):
+            response_placeholder.markdown(
+                f'<div class="offtrack">{OFF_TOPIC_RESPONSE}</div>',
+                unsafe_allow_html=True,
+            )
+            st.session_state.history.append(
+                {"role": "assistant", "content": OFF_TOPIC_RESPONSE}
+            )
+
+        else:
+            # ── Step 4: Build context ─────────────────────────────────────────
+            context_parts = []
+
+            if shipment_rec:
+                ship_block = (
+                    f"SHIPMENT RECORD (exact match for {shipment_id}):\n"
+                    + "\n".join(f"  {k}: {v}" for k, v in shipment_rec.items())
+                )
+                context_parts.append(ship_block)
+
+            context_parts.append(format_context(chunks))
+            full_context = "\n\n".join(context_parts)
+
+            rag_prompt = (
+                f"Use the following knowledge base excerpts to answer the customer question.\n\n"
+                f"CONTEXT:\n{full_context}\n\n"
+                f"CUSTOMER QUESTION: {user_input}"
+            )
+
+            # ── Step 5: Build message history for Ollama ─────────────────────
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            # Include last 6 turns for context
+            for h in st.session_state.history[:-1][-6:]:
+                messages.append({"role": h["role"], "content": h["content"]})
+            messages.append({"role": "user", "content": rag_prompt})
+
+            # ── Step 6: Stream response ───────────────────────────────────────
+            full_response = ""
+            try:
+                stream = ollama.chat(
+                    model    = st.session_state.model,
+                    messages = messages,
+                    stream   = True,
+                )
+                for chunk in stream:
+                    token = chunk["message"]["content"]
+                    full_response += token
+                    response_placeholder.markdown(full_response + "▌")
+
+                response_placeholder.markdown(full_response)
+
+            except Exception as e:
+                err_msg = f"Sorry, I encountered an error connecting to the model: `{e}`\n\nPlease make sure Ollama is running and `{st.session_state.model}` is pulled."
+                response_placeholder.warning(err_msg)
+                full_response = err_msg
+
+            # ── Step 7: Source badges ─────────────────────────────────────────
+            used_sources = list({c["source"] for c in chunks})
+            if shipment_rec:
+                used_sources.insert(0, "shipments")
+            used_sources = list(dict.fromkeys(used_sources))   # deduplicate, preserve order
+
+            if used_sources:
+                badges = " ".join(
+                    f'<span class="src-badge">📄 {SOURCE_LABELS.get(s, s)}</span>'
+                    for s in used_sources
+                )
+                sources_placeholder.markdown(
+                    f"<div style='margin-top:4px;'>Sources: {badges}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── Step 8: Store clean assistant reply ───────────────────────────
+            st.session_state.history.append(
+                {"role": "assistant", "content": full_response}
+            )

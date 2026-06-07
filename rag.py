@@ -6,6 +6,8 @@ Handles semantic search over the ChromaDB collection and structured shipment loo
 import os
 import re
 import json
+import math
+from collections import Counter
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -22,6 +24,7 @@ _client = None
 _col    = None
 _ships  = None
 _cross_encoder = None
+_bm25_index = None
 
 
 def _get_collection():
@@ -63,13 +66,144 @@ def retrieve(query: str, k: int = 5) -> list[dict]:
         include     = ["documents", "metadatas", "distances"],
     )
     out = []
-    for doc, meta, dist in zip(
+    for chunk_id, doc, meta, dist in zip(
+        results["ids"][0],
         results["documents"][0],
         results["metadatas"][0],
         results["distances"][0],
     ):
-        out.append({"text": doc, "source": meta["source"], "distance": dist})
+        out.append({"id": chunk_id, "text": doc, "source": meta["source"], "distance": dist})
     return out
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _get_bm25_index() -> dict:
+    """Build a lightweight BM25 index from the ChromaDB documents."""
+    global _bm25_index
+    if _bm25_index is not None:
+        return _bm25_index
+
+    col = _get_collection()
+    results = col.get(include=["documents", "metadatas"])
+    docs = results["documents"]
+    metas = results["metadatas"]
+    ids = results["ids"]
+
+    tokenized_docs = [_tokenize(doc) for doc in docs]
+    term_counts = [Counter(tokens) for tokens in tokenized_docs]
+    doc_freq = Counter()
+    for tokens in tokenized_docs:
+        doc_freq.update(set(tokens))
+
+    total_docs = len(docs)
+    avg_doc_len = (
+        sum(len(tokens) for tokens in tokenized_docs) / total_docs
+        if total_docs
+        else 0
+    )
+    idf = {
+        term: math.log(1 + (total_docs - freq + 0.5) / (freq + 0.5))
+        for term, freq in doc_freq.items()
+    }
+
+    _bm25_index = {
+        "docs": docs,
+        "metas": metas,
+        "ids": ids,
+        "term_counts": term_counts,
+        "doc_lengths": [len(tokens) for tokens in tokenized_docs],
+        "avg_doc_len": avg_doc_len,
+        "idf": idf,
+    }
+    return _bm25_index
+
+
+def retrieve_bm25(query: str, k: int = 5) -> list[dict]:
+    """Lexical BM25 search; returns list of {text, source, bm25_score}."""
+    index = _get_bm25_index()
+    query_terms = _tokenize(query)
+    if not query_terms or not index["docs"]:
+        return []
+
+    k1 = 1.5
+    b = 0.75
+    scores = []
+    avg_doc_len = index["avg_doc_len"] or 1
+
+    for i, counts in enumerate(index["term_counts"]):
+        score = 0.0
+        doc_len = index["doc_lengths"][i] or 1
+        for term in query_terms:
+            freq = counts.get(term, 0)
+            if not freq:
+                continue
+            denom = freq + k1 * (1 - b + b * doc_len / avg_doc_len)
+            score += index["idf"].get(term, 0.0) * (freq * (k1 + 1) / denom)
+        if score > 0:
+            scores.append((score, i))
+
+    ranked = sorted(scores, reverse=True)[:k]
+    return [
+        {
+            "id": index["ids"][i],
+            "text": index["docs"][i],
+            "source": index["metas"][i]["source"],
+            "bm25_score": float(score),
+        }
+        for score, i in ranked
+    ]
+
+
+def _chunk_key(chunk: dict) -> str:
+    return chunk.get("id") or f"{chunk.get('source', '')}:{hash(chunk.get('text', ''))}"
+
+
+def reciprocal_rank_fusion(
+    vector_chunks: list[dict],
+    bm25_chunks: list[dict],
+    rrf_k: int = 60,
+) -> list[dict]:
+    """Merge vector and BM25 rankings using reciprocal rank fusion."""
+    scores = {}
+    chunks_by_key = {}
+
+    for result_list in (vector_chunks, bm25_chunks):
+        for rank, chunk in enumerate(result_list, start=1):
+            key = _chunk_key(chunk)
+            scores[key] = scores.get(key, 0.0) + 1 / (rrf_k + rank)
+            if key not in chunks_by_key:
+                chunks_by_key[key] = chunk.copy()
+            else:
+                chunks_by_key[key].update(chunk)
+
+    ranked_keys = sorted(scores, key=scores.get, reverse=True)
+    fused = []
+    for key in ranked_keys:
+        item = chunks_by_key[key].copy()
+        item["rrf_score"] = scores[key]
+        fused.append(item)
+    return fused
+
+
+def retrieve_hybrid(query: str, k: int = 5) -> list[dict]:
+    """Combine vector and BM25 retrieval with reciprocal rank fusion."""
+    vector_chunks = retrieve(query, k=k)
+    bm25_chunks = retrieve_bm25(query, k=k)
+    return reciprocal_rank_fusion(vector_chunks, bm25_chunks)[:k]
+
+
+def retrieve_context(query: str, mode: str = "vector", k: int = 5) -> list[dict]:
+    """Retrieve context chunks with the selected first-stage method."""
+    if mode == "vector":
+        return retrieve(query, k=k)
+    if mode == "bm25":
+        return retrieve_bm25(query, k=k)
+    if mode == "hybrid":
+        return retrieve_hybrid(query, k=k)
+    raise ValueError(f"Unknown retrieval mode: {mode}")
 
 
 def get_cross_encoder():

@@ -10,6 +10,7 @@ import streamlit as st
 
 from rag import (
     retrieve,
+    retrieve_context,
     rerank,
     is_relevant,
     format_context,
@@ -87,6 +88,11 @@ st.markdown("""
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 AVAILABLE_MODELS = ["qwen2.5:3b", "qwen2.5:7b", "qwen2.5:14b"]
+RETRIEVAL_METHODS = {
+    "vector": "Vector",
+    "bm25": "BM25",
+    "hybrid": "Hybrid",
+}
 
 SYSTEM_PROMPT = """You are Nova, the friendly and knowledgeable customer support assistant for NovaCart Marketplace, a digital marketplace operating across the Middle East.
 
@@ -134,6 +140,8 @@ if "relevance_threshold" not in st.session_state:
     st.session_state.relevance_threshold = RELEVANCE_THRESHOLD
 if "reranking_enabled" not in st.session_state:
     st.session_state.reranking_enabled = False
+if "retrieval_method" not in st.session_state:
+    st.session_state.retrieval_method = "vector"
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -160,6 +168,15 @@ with st.sidebar:
             help="Detect NVC######## IDs and run an exact shipment lookup before RAG.",
         )
         st.caption("When on, messages containing an NVC######## ID use exact shipment lookup before RAG.")
+        st.session_state.retrieval_method = st.radio(
+            "Retrieval method",
+            options=list(RETRIEVAL_METHODS.keys()),
+            index=list(RETRIEVAL_METHODS.keys()).index(st.session_state.retrieval_method),
+            format_func=lambda mode: RETRIEVAL_METHODS[mode],
+            horizontal=True,
+            help="Choose how candidate chunks are retrieved before optional reranking.",
+        )
+        st.caption("Vector uses embeddings; BM25 uses keyword overlap; hybrid combines both.")
         st.session_state.reranking_enabled = st.toggle(
             f"Reranking (top-{RERANK_CANDIDATES} -> top-{RERANK_TOP_N})",
             value=st.session_state.reranking_enabled,
@@ -238,14 +255,26 @@ if user_input:
         if shipment_id:
             shipment_rec = lookup_shipment(shipment_id)
 
-        # ── Step 2: Semantic retrieval ────────────────────────────────────────
+        # ── Step 2: Context retrieval ─────────────────────────────────────────
         retrieval_k = RERANK_CANDIDATES if st.session_state.reranking_enabled else 5
-        chunks = retrieve(user_input, k=retrieval_k)
+        chunks = retrieve_context(
+            user_input,
+            mode=st.session_state.retrieval_method,
+            k=retrieval_k,
+        )
+
+        # The relevance threshold is based on vector distance, so keep the
+        # off-topic gate anchored to vector retrieval across all retrieval modes.
+        relevance_chunks = (
+            chunks
+            if st.session_state.retrieval_method == "vector"
+            else retrieve(user_input, k=5)
+        )
 
         # ── Step 3: Relevance gate ────────────────────────────────────────────
         if not is_relevant(
             user_input,
-            chunks,
+            relevance_chunks,
             threshold=st.session_state.relevance_threshold,
         ):
             response_placeholder.markdown(

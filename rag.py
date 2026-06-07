@@ -15,10 +15,13 @@ CHROMA_DIR  = os.path.join(BASE_DIR, "chroma_db")
 COLLECTION  = "novacart_knowledge"
 EMBED_MODEL = "all-MiniLM-L6-v2"
 SHIPS_JSON  = os.path.join(BASE_DIR, "shipments.json")
+RERANK_CANDIDATES = 10
+RERANK_TOP_N = 3
 
 _client = None
 _col    = None
 _ships  = None
+_cross_encoder = None
 
 
 def _get_collection():
@@ -67,6 +70,32 @@ def retrieve(query: str, k: int = 5) -> list[dict]:
     ):
         out.append({"text": doc, "source": meta["source"], "distance": dist})
     return out
+
+
+def get_cross_encoder():
+    """Lazy-load the cross-encoder used for optional second-stage reranking."""
+    global _cross_encoder
+    if _cross_encoder is None:
+        from sentence_transformers.cross_encoder import CrossEncoder
+        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _cross_encoder
+
+
+def rerank(query: str, chunks: list[dict], top_n: int = RERANK_TOP_N) -> list[dict]:
+    """Rerank retrieved chunks by scoring each query/chunk pair jointly."""
+    if not chunks:
+        return []
+
+    ce = get_cross_encoder()
+    pairs = [(query, chunk["text"]) for chunk in chunks]
+    scores = ce.predict(pairs)
+
+    ranked = []
+    for score, chunk in sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True):
+        item = chunk.copy()
+        item["rerank_score"] = float(score)
+        ranked.append(item)
+    return ranked[:top_n]
 
 
 SOURCE_LABELS = {

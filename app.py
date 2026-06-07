@@ -10,12 +10,15 @@ import streamlit as st
 
 from rag import (
     retrieve,
+    rerank,
     is_relevant,
     format_context,
     extract_shipment_id,
     lookup_shipment,
     SOURCE_LABELS,
     RELEVANCE_THRESHOLD,
+    RERANK_CANDIDATES,
+    RERANK_TOP_N,
 )
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -129,6 +132,8 @@ if "shipment_regex_enabled" not in st.session_state:
     st.session_state.shipment_regex_enabled = True
 if "relevance_threshold" not in st.session_state:
     st.session_state.relevance_threshold = RELEVANCE_THRESHOLD
+if "reranking_enabled" not in st.session_state:
+    st.session_state.reranking_enabled = False
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -155,6 +160,12 @@ with st.sidebar:
             help="Detect NVC######## IDs and run an exact shipment lookup before RAG.",
         )
         st.caption("When on, messages containing an NVC######## ID use exact shipment lookup before RAG.")
+        st.session_state.reranking_enabled = st.toggle(
+            f"Reranking (top-{RERANK_CANDIDATES} -> top-{RERANK_TOP_N})",
+            value=st.session_state.reranking_enabled,
+            help="Retrieve more chunks, score them with a cross-encoder, and pass only the best ones to Qwen.",
+        )
+        st.caption("Uses a cross-encoder to reorder retrieved chunks before answering.")
         st.session_state.relevance_threshold = st.slider(
             "Relevance threshold",
             min_value=0.1,
@@ -228,7 +239,8 @@ if user_input:
             shipment_rec = lookup_shipment(shipment_id)
 
         # ── Step 2: Semantic retrieval ────────────────────────────────────────
-        chunks = retrieve(user_input, k=5)
+        retrieval_k = RERANK_CANDIDATES if st.session_state.reranking_enabled else 5
+        chunks = retrieve(user_input, k=retrieval_k)
 
         # ── Step 3: Relevance gate ────────────────────────────────────────────
         if not is_relevant(
@@ -245,7 +257,11 @@ if user_input:
             )
 
         else:
-            # ── Step 4: Build context ─────────────────────────────────────────
+            # ── Step 4: Optional reranking and context build ──────────────────
+            if st.session_state.reranking_enabled:
+                with st.spinner("Reranking retrieved chunks..."):
+                    chunks = rerank(user_input, chunks, top_n=RERANK_TOP_N)
+
             context_parts = []
 
             if shipment_rec:

@@ -1,0 +1,554 @@
+# NovaCart RAG eval dataset
+# 30 shipment-lookup + 30 generic Q&A + 8 out-of-scope = 68 cases
+# Schema: id, category, subcategory (optional), question, in_scope,
+#         gold_facts (substrings the judge checks for), gold_source
+
+# =============================================================================
+# SHIPMENT-LOOKUP (30) — keyed off shipments.json
+# 15 direct ID lookups, 8 multi-field comparisons, 4 ambiguous IDs, 3 invalid IDs
+# =============================================================================
+
+- id: ship-001
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What is the status of shipment NVC00000001?"
+  in_scope: true
+  gold_facts: ["Returned to Sender"]
+  gold_source: shipments
+
+- id: ship-002
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Where is NVC00000010 being shipped to?"
+  in_scope: true
+  gold_facts: ["Doha", "UAE"]
+  gold_source: shipments
+
+- id: ship-003
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Which courier is handling NVC00000020?"
+  in_scope: true
+  gold_facts: ["DesertRoute Logistics"]
+  gold_source: shipments
+
+- id: ship-004
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "When is shipment NVC00000033 expected to arrive?"
+  in_scope: true
+  gold_facts: ["2026-05-27"]
+  gold_source: shipments
+
+- id: ship-005
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What is the current status of NVC00000042?"
+  in_scope: true
+  gold_facts: ["Cancelled"]
+  gold_source: shipments
+
+- id: ship-006
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Has shipment NVC00000050 been delivered?"
+  in_scope: true
+  gold_facts: ["Delivered"]
+  gold_source: shipments
+
+- id: ship-007
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What city is NVC00000060 going to?"
+  in_scope: true
+  gold_facts: ["Cairo"]
+  gold_source: shipments
+
+- id: ship-008
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Tell me about NVC00000075."
+  in_scope: true
+  gold_facts: ["Delivered", "Dammam"]
+  gold_source: shipments
+
+- id: ship-009
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What's the latest update on NVC00000088?"
+  in_scope: true
+  gold_facts: ["Packed", "Kuwait City"]
+  gold_source: shipments
+
+- id: ship-010
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Why is NVC00000099 not arriving?"
+  in_scope: true
+  gold_facts: ["Delayed"]
+  gold_source: shipments
+
+- id: ship-011
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "Which fulfillment center processed NVC00000005?"
+  in_scope: true
+  gold_facts: ["Aster Central FC"]
+  gold_source: shipments
+
+- id: ship-012
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What is the destination country for NVC00000015?"
+  in_scope: true
+  gold_facts: ["Egypt"]
+  gold_source: shipments
+
+- id: ship-013
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "When was NVC00000025 created?"
+  in_scope: true
+  gold_facts: ["2026-05"]
+  gold_source: shipments
+
+- id: ship-014
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What's the order ID associated with NVC00000040?"
+  in_scope: true
+  gold_facts: ["ORD-2026-100040"]
+  gold_source: shipments
+
+- id: ship-015
+  category: shipment-lookup
+  subcategory: direct-lookup
+  question: "What does the remarks field say for NVC00000055?"
+  in_scope: true
+  gold_facts: ["Shipped"]
+  gold_source: shipments
+
+- id: ship-016
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Is NVC00000050 delivered and what city did it go to?"
+  in_scope: true
+  gold_facts: ["Delivered", "Abu Dhabi"]
+  gold_source: shipments
+
+- id: ship-017
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Which courier is delivering NVC00000065 and is it on time?"
+  in_scope: true
+  gold_facts: ["DesertRoute Logistics", "Delayed"]
+  gold_source: shipments
+
+- id: ship-018
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Show me both the status and estimated delivery date for NVC00000070."
+  in_scope: true
+  gold_facts: ["Delayed", "2026-05-27"]
+  gold_source: shipments
+
+- id: ship-019
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "For shipment NVC00000080, what is the destination city and the courier?"
+  in_scope: true
+  gold_facts: ["Manama", "DesertRoute Logistics"]
+  gold_source: shipments
+
+- id: ship-020
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Where is NVC00000090 going and why is it delayed?"
+  in_scope: true
+  gold_facts: ["Muscat", "Delayed"]
+  gold_source: shipments
+
+- id: ship-021
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Has NVC00000095 been delivered or is it still out?"
+  in_scope: true
+  gold_facts: ["Out for Delivery"]
+  gold_source: shipments
+
+- id: ship-022
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "What's the status of NVC00000002 and which country is it going to?"
+  in_scope: true
+  gold_facts: ["Delayed", "Bahrain"]
+  gold_source: shipments
+
+- id: ship-023
+  category: shipment-lookup
+  subcategory: multi-field
+  question: "Tell me the courier and the destination for shipment NVC00000007."
+  in_scope: true
+  gold_facts: ["LevantShip", "Cairo"]
+  gold_source: shipments
+
+- id: ship-024
+  category: shipment-lookup
+  subcategory: ambiguous-id
+  question: "What about shipment 00000001 — is it delivered?"
+  in_scope: true
+  gold_facts: ["Returned to Sender"]
+  gold_source: shipments
+
+- id: ship-025
+  category: shipment-lookup
+  subcategory: ambiguous-id
+  question: "Can you check shipment nvc00000050 for me?"
+  in_scope: true
+  gold_facts: ["Delivered"]
+  gold_source: shipments
+
+- id: ship-026
+  category: shipment-lookup
+  subcategory: ambiguous-id
+  question: "I'd like an update on NVC 00000033 please."
+  in_scope: true
+  gold_facts: ["Out for Delivery"]
+  gold_source: shipments
+
+- id: ship-027
+  category: shipment-lookup
+  subcategory: ambiguous-id
+  question: "Where's my package, ID NVC00000075?"
+  in_scope: true
+  gold_facts: ["Delivered"]
+  gold_source: shipments
+
+- id: ship-028
+  category: shipment-lookup
+  subcategory: invalid-id
+  question: "What's the status of shipment NVC99999999?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: ship-029
+  category: shipment-lookup
+  subcategory: invalid-id
+  question: "Can you look up shipment NVC00000200 for me?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: ship-030
+  category: shipment-lookup
+  subcategory: invalid-id
+  question: "Tell me about shipment NVC12345678."
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+# =============================================================================
+# GENERIC (30) — keyed off data/ docs
+# 10 HR policy, 10 customer QA, 10 company profile
+# =============================================================================
+
+- id: gen-001
+  category: generic
+  subcategory: hr-policy
+  question: "How many days of paid annual leave do full-time employees get?"
+  in_scope: true
+  gold_facts: ["25"]
+  gold_source: hr_policies
+
+- id: gen-002
+  category: generic
+  subcategory: hr-policy
+  question: "How many paid sick days are employees allowed per year?"
+  in_scope: true
+  gold_facts: ["10"]
+  gold_source: hr_policies
+
+- id: gen-003
+  category: generic
+  subcategory: hr-policy
+  question: "How long is the probation period for a new hire?"
+  in_scope: true
+  gold_facts: ["3 months"]
+  gold_source: hr_policies
+
+- id: gen-004
+  category: generic
+  subcategory: hr-policy
+  question: "How much paid parental leave does the primary caregiver receive?"
+  in_scope: true
+  gold_facts: ["16 weeks"]
+  gold_source: hr_policies
+
+- id: gen-005
+  category: generic
+  subcategory: hr-policy
+  question: "How many remote days per week are allowed for hybrid roles?"
+  in_scope: true
+  gold_facts: ["3"]
+  gold_source: hr_policies
+
+- id: gen-006
+  category: generic
+  subcategory: hr-policy
+  question: "What is the annual learning budget for full-time employees?"
+  in_scope: true
+  gold_facts: ["600"]
+  gold_source: hr_policies
+
+- id: gen-007
+  category: generic
+  subcategory: hr-policy
+  question: "When are mid-year and year-end performance reviews held?"
+  in_scope: true
+  gold_facts: ["June", "December"]
+  gold_source: hr_policies
+
+- id: gen-008
+  category: generic
+  subcategory: hr-policy
+  question: "How many days of bereavement leave is offered?"
+  in_scope: true
+  gold_facts: ["5"]
+  gold_source: hr_policies
+
+- id: gen-009
+  category: generic
+  subcategory: hr-policy
+  question: "How quickly should suspected phishing be reported?"
+  in_scope: true
+  gold_facts: ["1 hour"]
+  gold_source: hr_policies
+
+- id: gen-010
+  category: generic
+  subcategory: hr-policy
+  question: "How many unused leave days can carry forward to the next year?"
+  in_scope: true
+  gold_facts: ["5"]
+  gold_source: hr_policies
+
+- id: gen-011
+  category: generic
+  subcategory: qa-faq
+  question: "How do I track my order on NovaCart?"
+  in_scope: true
+  gold_facts: ["shipment ID", "NVC"]
+  gold_source: qa_knowledge
+
+- id: gen-012
+  category: generic
+  subcategory: qa-faq
+  question: "How long does standard delivery normally take?"
+  in_scope: true
+  gold_facts: ["2", "5", "business days"]
+  gold_source: qa_knowledge
+
+- id: gen-013
+  category: generic
+  subcategory: qa-faq
+  question: "What is the standard return window for most items?"
+  in_scope: true
+  gold_facts: ["14 days"]
+  gold_source: qa_knowledge
+
+- id: gen-014
+  category: generic
+  subcategory: qa-faq
+  question: "How long is the return window for NovaPlus members?"
+  in_scope: true
+  gold_facts: ["30 days"]
+  gold_source: qa_knowledge
+
+- id: gen-015
+  category: generic
+  subcategory: qa-faq
+  question: "How many delivery attempts does NovaCart make before returning a shipment?"
+  in_scope: true
+  gold_facts: ["two", "2"]
+  gold_source: qa_knowledge
+
+- id: gen-016
+  category: generic
+  subcategory: qa-faq
+  question: "What does the 'Out for Delivery' status mean?"
+  in_scope: true
+  gold_facts: ["courier", "same day"]
+  gold_source: qa_knowledge
+
+- id: gen-017
+  category: generic
+  subcategory: qa-faq
+  question: "Can I cancel my order after it's been shipped?"
+  in_scope: true
+  gold_facts: ["refuse", "return"]
+  gold_source: qa_knowledge
+
+- id: gen-018
+  category: generic
+  subcategory: qa-faq
+  question: "What is NovaWallet used for?"
+  in_scope: true
+  gold_facts: ["refunds", "credits"]
+  gold_source: qa_knowledge
+
+- id: gen-019
+  category: generic
+  subcategory: qa-faq
+  question: "Can I return perishable grocery items?"
+  in_scope: true
+  gold_facts: ["damaged", "expired"]
+  gold_source: qa_knowledge
+
+- id: gen-020
+  category: generic
+  subcategory: qa-faq
+  question: "Can I combine multiple coupons in one order?"
+  in_scope: true
+  gold_facts: ["one"]
+  gold_source: qa_knowledge
+
+- id: gen-021
+  category: generic
+  subcategory: company
+  question: "Which region does NovaCart Marketplace primarily operate in?"
+  in_scope: true
+  gold_facts: ["Middle East"]
+  gold_source: company_profile
+
+- id: gen-022
+  category: generic
+  subcategory: company
+  question: "What format do NovaCart shipment IDs follow?"
+  in_scope: true
+  gold_facts: ["NVC", "eight digits"]
+  gold_source: company_profile
+
+- id: gen-023
+  category: generic
+  subcategory: company
+  question: "What payment methods does NovaCart accept?"
+  in_scope: true
+  gold_facts: ["card", "wallet"]
+  gold_source: company_profile
+
+- id: gen-024
+  category: generic
+  subcategory: company
+  question: "What are some of the main NovaPlus membership benefits?"
+  in_scope: true
+  gold_facts: ["express delivery", "extended return"]
+  gold_source: company_profile
+
+- id: gen-025
+  category: generic
+  subcategory: company
+  question: "Does NovaCart sell directly or through third-party sellers?"
+  in_scope: true
+  gold_facts: ["both", "third-party"]
+  gold_source: company_profile
+
+- id: gen-026
+  category: generic
+  subcategory: company
+  question: "When should the chatbot escalate a case to a human agent?"
+  in_scope: true
+  gold_facts: ["fraud", "payment", "damaged"]
+  gold_source: company_profile
+
+- id: gen-027
+  category: generic
+  subcategory: company
+  question: "What product categories does NovaCart sell?"
+  in_scope: true
+  gold_facts: ["electronics", "groceries"]
+  gold_source: company_profile
+
+- id: gen-028
+  category: generic
+  subcategory: company
+  question: "What kind of authentication is needed for sensitive account actions?"
+  in_scope: true
+  gold_facts: ["authentication", "verif"]
+  gold_source: company_profile
+
+- id: gen-029
+  category: generic
+  subcategory: company
+  question: "What is NovaCart's mission?"
+  in_scope: true
+  gold_facts: ["simple", "reliable", "affordable"]
+  gold_source: company_profile
+
+- id: gen-030
+  category: generic
+  subcategory: company
+  question: "Is express delivery available everywhere?"
+  in_scope: true
+  gold_facts: ["selected cities"]
+  gold_source: company_profile
+
+# =============================================================================
+# OUT-OF-SCOPE (8) — gate should refuse
+# =============================================================================
+
+- id: oos-001
+  category: out-of-scope
+  question: "What's the weather like in Paris today?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-002
+  category: out-of-scope
+  question: "Write me a Python function that sorts a list."
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-003
+  category: out-of-scope
+  question: "Who won the World Cup in 2022?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-004
+  category: out-of-scope
+  question: "Can you recommend a good Italian restaurant in Madrid?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-005
+  category: out-of-scope
+  question: "What is the capital of Argentina?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-006
+  category: out-of-scope
+  question: "Explain quantum entanglement to me."
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-007
+  category: out-of-scope
+  question: "Translate 'good morning' into Japanese."
+  in_scope: false
+  gold_facts: []
+  gold_source: none
+
+- id: oos-008
+  category: out-of-scope
+  question: "What stocks should I buy this week?"
+  in_scope: false
+  gold_facts: []
+  gold_source: none

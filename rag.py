@@ -20,9 +20,10 @@ SHIPS_JSON  = os.path.join(BASE_DIR, "shipments.json")
 RERANK_CANDIDATES = 10
 RERANK_TOP_N = 3
 
-_client = None
-_col    = None
-_ships  = None
+_client      = None
+_col         = None
+_ships       = None
+_order_index = None
 _cross_encoder = None
 _bm25_index = None
 
@@ -48,13 +49,31 @@ def _get_shipments() -> dict:
 
 
 def extract_shipment_id(text: str) -> str | None:
-    """Pull NVC########  from user message if present."""
+    """Pull NVC######## from user message if present."""
     m = re.search(r"\bNVC\d{8}\b", text.upper())
+    return m.group(0) if m else None
+
+
+def extract_order_id(text: str) -> str | None:
+    """Pull ORD-YYYY-###### from user message if present."""
+    m = re.search(r"\bORD-\d{4}-\d{6}\b", text.upper())
     return m.group(0) if m else None
 
 
 def lookup_shipment(shipment_id: str) -> dict | None:
     return _get_shipments().get(shipment_id.upper())
+
+
+def lookup_shipment_by_order_id(order_id: str) -> dict | None:
+    """Find a shipment record by Order ID (ORD-YYYY-######). Builds a lazy index on first call."""
+    global _order_index
+    if _order_index is None:
+        _order_index = {
+            rec["Order ID"]: rec
+            for rec in _get_shipments().values()
+            if rec.get("Order ID")
+        }
+    return _order_index.get(order_id.upper())
 
 
 def retrieve(query: str, k: int = 5) -> list[dict]:

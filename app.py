@@ -16,7 +16,9 @@ from rag import (
     is_relevant,
     format_context,
     extract_shipment_id,
+    extract_order_id,
     lookup_shipment,
+    lookup_shipment_by_order_id,
     augment_query,
     update_conversation_memory,
     SOURCE_LABELS,
@@ -361,13 +363,19 @@ if user_input:
         response_placeholder = st.empty()
         sources_placeholder  = st.empty()
 
-        # ── Step 1: Shipment ID exact lookup ─────────────────────────────────
+        # ── Step 1: Shipment / Order ID exact lookup ──────────────────────────
         shipment_id  = None
         shipment_rec = None
         if st.session_state.shipment_regex_enabled:
             shipment_id = extract_shipment_id(user_input)
-        if shipment_id:
-            shipment_rec = lookup_shipment(shipment_id)
+            if shipment_id:
+                shipment_rec = lookup_shipment(shipment_id)
+            else:
+                order_id = extract_order_id(user_input)
+                if order_id:
+                    shipment_rec = lookup_shipment_by_order_id(order_id)
+                    if shipment_rec:
+                        shipment_id = shipment_rec["Shipment ID"]
 
         # ── Step 1.5: Augment query with session memory ───────────────────────
         retrieval_query, tier = augment_query(user_input, st.session_state.conversation_memory)

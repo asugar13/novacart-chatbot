@@ -5,6 +5,7 @@ Requires:  python ingest.py  to have been run first.
 """
 
 import os
+import random
 import ollama
 import streamlit as st
 
@@ -98,6 +99,40 @@ RETRIEVAL_METHODS = {
     "hybrid": "Hybrid",
 }
 
+SUGGESTION_TEMPLATES: dict[str, list[str]] = {
+    "shipment": [
+        "What do I do if my shipment is delayed?",
+        "How do I reschedule my delivery?",
+        "Can I change my delivery address?",
+    ],
+    "delivery": [
+        "What are NovaCart's delivery time windows?",
+        "What happens if I miss my delivery?",
+        "Can I request express delivery?",
+    ],
+    "return": [
+        "How long does a refund take to process?",
+        "Can I exchange an item instead of returning it?",
+        "Which items are not eligible for return?",
+    ],
+    "payment": [
+        "How do I add money to my NovaWallet?",
+        "Is cash on delivery available in my area?",
+        "How long does a card refund take?",
+    ],
+    "membership": [
+        "What benefits does NovaPlus include?",
+        "How do I cancel my NovaPlus subscription?",
+        "Can I share my NovaPlus membership?",
+    ],
+    "hr": [
+        "How many days of annual leave do I get?",
+        "What is the remote work policy?",
+        "How do I submit a leave request?",
+    ],
+}
+
+
 def _rewrite_query(query: str, history: list[dict], model: str) -> str:
     """LLM fallback: rewrite a referential query as a standalone question."""
     recent_text = "\n".join(
@@ -120,6 +155,51 @@ def _rewrite_query(query: str, history: list[dict], model: str) -> str:
     return resp["message"]["content"].strip()
 
 
+def _generate_suggestions_llm(answer: str, model: str) -> list[str]:
+    """Ask the LLM to suggest 3 follow-up questions when no template matches."""
+    prompt = (
+        f"A NovaCart customer support bot just gave this answer:\n{answer[:500]}\n\n"
+        f"Generate exactly 3 short follow-up questions a customer might ask next, "
+        f"related to NovaCart services. Each on a separate line. No numbering or bullets."
+    )
+    resp = ollama.chat(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        stream=False,
+        options={"temperature": 0.3},
+    )
+    lines = [l.strip() for l in resp["message"]["content"].splitlines() if l.strip()]
+    return lines[:3]
+
+
+def _get_suggestions(topics: list[str], answer: str, model: str) -> list[str]:
+    """Return 3 suggestion chips: template-based when topic is known, LLM otherwise."""
+    for topic in topics:
+        if topic in SUGGESTION_TEMPLATES:
+            return random.sample(SUGGESTION_TEMPLATES[topic], min(3, len(SUGGESTION_TEMPLATES[topic])))
+    try:
+        return _generate_suggestions_llm(answer, model)
+    except Exception:
+        return []
+
+
+def _render_suggestions_ui(suggestions: list[str], key_prefix: str = "s") -> None:
+    """Render suggestion chips inside a chat message block."""
+    if not suggestions:
+        return
+    st.markdown(
+        "<p style='font-size:0.8rem;color:#888;margin:10px 0 4px;'>💬 <b>You might also ask:</b></p>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(3)
+    for i, sug in enumerate(suggestions[:3]):
+        with cols[i]:
+            if st.button(sug, use_container_width=True, key=f"{key_prefix}_{hash(sug)}"):
+                st.session_state.pending_query = sug
+                st.session_state.suggestions = []
+                st.rerun()
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "history" not in st.session_state:
     st.session_state.history = []        # [{role, content}]
@@ -137,6 +217,8 @@ if "conversation_memory" not in st.session_state:
     st.session_state.conversation_memory = {"shipment_ids": [], "active_shipment": None, "topics": []}
 if "last_retrieval_tier" not in st.session_state:
     st.session_state.last_retrieval_tier = "passthrough"
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = []
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -230,6 +312,7 @@ with st.sidebar:
         st.session_state.history = []
         st.session_state.conversation_memory = {"shipment_ids": [], "active_shipment": None, "topics": []}
         st.session_state.last_retrieval_tier = "passthrough"
+        st.session_state.suggestions = []
         st.rerun()
 
     st.caption(f"Model: `{st.session_state.model}`")
@@ -247,16 +330,27 @@ st.markdown("""
 
 
 # ── Chat history display ──────────────────────────────────────────────────────
-for msg in st.session_state.history:
+for i, msg in enumerate(st.session_state.history):
     with st.chat_message(msg["role"], avatar="🛒" if msg["role"] == "assistant" else "🧑"):
         st.markdown(msg["content"], unsafe_allow_html=True)
+        if (
+            msg["role"] == "assistant"
+            and i == len(st.session_state.history) - 1
+            and st.session_state.suggestions
+        ):
+            _render_suggestions_ui(st.session_state.suggestions, key_prefix="h")
 
 
 # ── Chat input ────────────────────────────────────────────────────────────────
 user_input = st.chat_input("Ask me about your order, delivery, return policy...")
 
+if not user_input and "pending_query" in st.session_state:
+    user_input = st.session_state.pending_query
+    del st.session_state.pending_query
+
 if user_input:
     user_input = user_input.strip()
+    st.session_state.suggestions = []
 
     # Display user message
     with st.chat_message("user", avatar="🧑"):
@@ -392,6 +486,16 @@ if user_input:
             st.session_state.history.append(
                 {"role": "assistant", "content": full_response}
             )
+
+            # ── Step 10: Suggestion chips ─────────────────────────────────────
+            if not full_response.startswith("Sorry, I encountered an error"):
+                suggestions = _get_suggestions(
+                    st.session_state.conversation_memory["topics"],
+                    full_response,
+                    st.session_state.model,
+                )
+                st.session_state.suggestions = suggestions
+                _render_suggestions_ui(suggestions, key_prefix="g")
 
         # ── Step 9: Update conversation memory ───────────────────────────────
         update_conversation_memory(

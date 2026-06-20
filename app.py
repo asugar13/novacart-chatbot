@@ -6,9 +6,11 @@ Requires:  python ingest.py  to have been run first.
 
 import os
 import random
+import uuid
 import ollama
 import streamlit as st
 
+from escalation import DETECTION_MODES, assess_escalation
 from rag import (
     retrieve,
     retrieve_context,
@@ -202,6 +204,79 @@ def _render_suggestions_ui(suggestions: list[str], key_prefix: str = "s") -> Non
                 st.rerun()
 
 
+def _build_handoff_ticket(offer: dict) -> dict:
+    """Create a local demo ticket containing the context a human agent would need."""
+    active_shipment = st.session_state.conversation_memory.get("active_shipment")
+    recent_user_messages = [
+        msg["content"]
+        for msg in st.session_state.history
+        if msg["role"] == "user"
+    ][-4:]
+    return {
+        "ticket_id": f"NC-{uuid.uuid4().hex[:8].upper()}",
+        "reason": offer["reason"],
+        "detector": offer["detector"],
+        "level": offer["level"],
+        "active_shipment": active_shipment,
+        "recent_user_messages": recent_user_messages,
+    }
+
+
+def _render_escalation_ui(offer: dict) -> None:
+    """Show a persistent handoff card and create a simulated support ticket."""
+    if not offer:
+        return
+
+    if offer.get("accepted"):
+        ticket = st.session_state.handoff_ticket
+        if ticket:
+            st.success(
+                f"Support handoff prepared — reference `{ticket['ticket_id']}`."
+            )
+            with st.expander("Prepared handoff details"):
+                st.markdown(f"**Reason:** {ticket['reason']}")
+                shipment = ticket.get("active_shipment")
+                if shipment:
+                    st.markdown(
+                        f"**Shipment:** {shipment.get('Shipment ID', '—')} · "
+                        f"**Order:** {shipment.get('Order ID', '—')}"
+                    )
+                st.markdown("**Recent customer messages:**")
+                for message in ticket["recent_user_messages"]:
+                    st.markdown(f"- {message}")
+                st.caption(
+                    "Demo only: this prepares the handoff payload but does not "
+                    "submit it to a real support system."
+                )
+        return
+
+    st.warning(
+        "It sounds like this may have been frustrating. "
+        "Would you like me to prepare this conversation for a support agent?"
+    )
+    message_index = offer["message_index"]
+    accept_col, dismiss_col = st.columns(2)
+    with accept_col:
+        if st.button(
+            "Talk to a support agent",
+            type="primary",
+            use_container_width=True,
+            key=f"accept_handoff_{message_index}",
+        ):
+            offer["accepted"] = True
+            st.session_state.escalation_requested = True
+            st.session_state.handoff_ticket = _build_handoff_ticket(offer)
+            st.rerun()
+    with dismiss_col:
+        if st.button(
+            "Continue with Nova",
+            use_container_width=True,
+            key=f"dismiss_handoff_{message_index}",
+        ):
+            st.session_state.escalation_offer = None
+            st.rerun()
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "history" not in st.session_state:
     st.session_state.history = []        # [{role, content}]
@@ -221,6 +296,20 @@ if "last_retrieval_tier" not in st.session_state:
     st.session_state.last_retrieval_tier = "passthrough"
 if "suggestions" not in st.session_state:
     st.session_state.suggestions = []
+if "escalation_enabled" not in st.session_state:
+    st.session_state.escalation_enabled = True
+if "escalation_mode" not in st.session_state:
+    st.session_state.escalation_mode = "hybrid"
+if "frustration_streak" not in st.session_state:
+    st.session_state.frustration_streak = 0
+if "last_escalation_assessment" not in st.session_state:
+    st.session_state.last_escalation_assessment = None
+if "escalation_offer" not in st.session_state:
+    st.session_state.escalation_offer = None
+if "escalation_requested" not in st.session_state:
+    st.session_state.escalation_requested = False
+if "handoff_ticket" not in st.session_state:
+    st.session_state.handoff_ticket = None
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -271,6 +360,29 @@ with st.sidebar:
             help="Lower values make off-topic filtering stricter; higher values make it more permissive.",
         )
         st.caption("Lower means stricter off-topic filtering; higher means more permissive.")
+        st.session_state.escalation_enabled = st.toggle(
+            "Human handoff detection",
+            value=st.session_state.escalation_enabled,
+            help=(
+                "Detect explicit human requests and sustained frustration, "
+                "then offer a simulated support handoff."
+            ),
+        )
+        st.session_state.escalation_mode = st.selectbox(
+            "Handoff detector",
+            options=list(DETECTION_MODES.keys()),
+            index=list(DETECTION_MODES.keys()).index(st.session_state.escalation_mode),
+            format_func=lambda mode: DETECTION_MODES[mode],
+            disabled=not st.session_state.escalation_enabled,
+            help=(
+                "Hybrid uses fast rules, a local emotion model, and Qwen only "
+                "for borderline cases."
+            ),
+        )
+        st.caption(
+            "The hybrid detector distinguishes a negative delivery event from "
+            "customer anger or a request for a human."
+        )
 
     with st.expander("Session Memory"):
         mem = st.session_state.conversation_memory
@@ -295,6 +407,39 @@ with st.sidebar:
         if not mem["shipment_ids"] and not mem["topics"]:
             st.caption("No entities tracked yet.")
 
+    with st.expander("Escalation Monitor"):
+        if not st.session_state.escalation_enabled:
+            st.caption("Human handoff detection is disabled.")
+        else:
+            st.caption(
+                f"Mode: **{DETECTION_MODES[st.session_state.escalation_mode]}**"
+            )
+            st.caption(
+                f"Frustration streak: **{st.session_state.frustration_streak}**"
+            )
+            assessment = st.session_state.last_escalation_assessment
+            if assessment:
+                st.caption(
+                    f"Last signal: **{assessment['level']}** · "
+                    f"{assessment['detector']} · "
+                    f"confidence {assessment['confidence']:.2f}"
+                )
+                scores = assessment.get("emotion_scores", {})
+                if scores:
+                    st.caption(
+                        f"Anger: {scores.get('anger', 0.0):.2f} · "
+                        f"Disgust: {scores.get('disgust', 0.0):.2f}"
+                    )
+                if assessment.get("model_error"):
+                    st.caption("A model was unavailable, so a fallback path was used.")
+            else:
+                st.caption("No customer message analysed yet.")
+            if st.session_state.handoff_ticket:
+                st.caption(
+                    f"Handoff prepared: "
+                    f"`{st.session_state.handoff_ticket['ticket_id']}`"
+                )
+
     st.divider()
     st.subheader("Topics I can help with")
     topics = [
@@ -315,6 +460,11 @@ with st.sidebar:
         st.session_state.conversation_memory = {"shipment_ids": [], "active_shipment": None, "topics": []}
         st.session_state.last_retrieval_tier = "passthrough"
         st.session_state.suggestions = []
+        st.session_state.frustration_streak = 0
+        st.session_state.last_escalation_assessment = None
+        st.session_state.escalation_offer = None
+        st.session_state.escalation_requested = False
+        st.session_state.handoff_ticket = None
         st.rerun()
 
     st.caption(f"Model: `{st.session_state.model}`")
@@ -335,10 +485,18 @@ st.markdown("""
 for i, msg in enumerate(st.session_state.history):
     with st.chat_message(msg["role"], avatar="🛒" if msg["role"] == "assistant" else "🧑"):
         st.markdown(msg["content"], unsafe_allow_html=True)
+        offer = st.session_state.escalation_offer
+        if (
+            msg["role"] == "assistant"
+            and offer
+            and offer["message_index"] == i
+        ):
+            _render_escalation_ui(offer)
         if (
             msg["role"] == "assistant"
             and i == len(st.session_state.history) - 1
             and st.session_state.suggestions
+            and not offer
         ):
             _render_suggestions_ui(st.session_state.suggestions, key_prefix="h")
 
@@ -362,6 +520,27 @@ if user_input:
     with st.chat_message("assistant", avatar="🛒"):
         response_placeholder = st.empty()
         sources_placeholder  = st.empty()
+
+        # ── Step 0: Detect frustration / human handoff intent ─────────────────
+        escalation_assessment = None
+        if st.session_state.escalation_enabled:
+            previous_user_messages = [
+                msg["content"]
+                for msg in st.session_state.history[:-1]
+                if msg["role"] == "user"
+            ][-3:]
+            with st.spinner("Checking support needs..."):
+                escalation_assessment = assess_escalation(
+                    user_input,
+                    previous_user_messages,
+                    mode=st.session_state.escalation_mode,
+                    model=st.session_state.model,
+                    previous_streak=st.session_state.frustration_streak,
+                )
+            st.session_state.frustration_streak = escalation_assessment.streak
+            st.session_state.last_escalation_assessment = (
+                escalation_assessment.to_dict()
+            )
 
         # ── Step 1: Shipment / Order ID exact lookup ──────────────────────────
         shipment_id  = None
@@ -393,23 +572,41 @@ if user_input:
         st.session_state.last_retrieval_tier = tier
 
         # ── Step 2: Context retrieval ─────────────────────────────────────────
-        retrieval_k = RERANK_CANDIDATES if st.session_state.reranking_enabled else 5
-        chunks = retrieve_context(
-            retrieval_query,
-            mode=st.session_state.retrieval_method,
-            k=retrieval_k,
+        direct_handoff = bool(
+            escalation_assessment
+            and escalation_assessment.explicit_request
         )
+        if direct_handoff:
+            chunks = []
+        else:
+            retrieval_k = RERANK_CANDIDATES if st.session_state.reranking_enabled else 5
+            chunks = retrieve_context(
+                retrieval_query,
+                mode=st.session_state.retrieval_method,
+                k=retrieval_k,
+            )
 
         # The relevance threshold is based on vector distance, so keep the
         # off-topic gate anchored to vector retrieval across all retrieval modes.
-        relevance_chunks = (
-            chunks
-            if st.session_state.retrieval_method == "vector"
-            else retrieve(retrieval_query, k=5)
-        )
+        relevance_chunks = []
+        if not direct_handoff:
+            relevance_chunks = (
+                chunks
+                if st.session_state.retrieval_method == "vector"
+                else retrieve(retrieval_query, k=5)
+            )
 
         # ── Step 3: Relevance gate ────────────────────────────────────────────
-        if not is_relevant(
+        if direct_handoff:
+            handoff_response = (
+                "Of course. I can prepare this conversation and any active "
+                "shipment details for a support agent."
+            )
+            response_placeholder.markdown(handoff_response)
+            st.session_state.history.append(
+                {"role": "assistant", "content": handoff_response}
+            )
+        elif not is_relevant(
             retrieval_query,
             relevance_chunks,
             threshold=st.session_state.relevance_threshold,
@@ -496,7 +693,13 @@ if user_input:
             )
 
             # ── Step 10: Suggestion chips ─────────────────────────────────────
-            if not full_response.startswith("Sorry, I encountered an error"):
+            if (
+                not full_response.startswith("Sorry, I encountered an error")
+                and not (
+                    escalation_assessment
+                    and escalation_assessment.should_offer
+                )
+            ):
                 suggestions = _get_suggestions(
                     st.session_state.conversation_memory["topics"],
                     full_response,
@@ -511,3 +714,12 @@ if user_input:
             user_input,
             shipment_rec,
         )
+
+        # ── Step 11: Offer a simulated human handoff ──────────────────────────
+        if escalation_assessment and escalation_assessment.should_offer:
+            st.session_state.suggestions = []
+            offer = escalation_assessment.to_dict()
+            offer["message_index"] = len(st.session_state.history) - 1
+            offer["accepted"] = False
+            st.session_state.escalation_offer = offer
+            _render_escalation_ui(offer)

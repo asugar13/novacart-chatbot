@@ -1,0 +1,333 @@
+# NovaCart escalation (human-handoff) eval dataset
+# 32 should-escalate + 19 should-not-escalate = 51 cases
+#
+# Schema: id, category, message, gold_escalate,
+#         context (optional list[str] of prior user messages, for Qwen),
+#         previous_streak (optional int, simulates prior frustrated-turn state)
+#
+# Positive class = the bot SHOULD offer a human handoff.
+# Cases are crafted so the four modes diverge: rules+strong phrases are caught by
+# the regex pre-step in EVERY mode, while high-emotion and context-dependent cases
+# can only be caught by the emotion model / Qwen.
+
+# =============================================================================
+# EXPLICIT REQUEST (7) — matches _EXPLICIT_HANDOFF_PATTERNS; every mode catches.
+# =============================================================================
+
+- id: esc-001
+  category: explicit-request
+  message: "Please connect me to a human agent."
+  gold_escalate: true
+
+- id: esc-002
+  category: explicit-request
+  message: "I want to speak to a manager."
+  gold_escalate: true
+
+- id: esc-003
+  category: explicit-request
+  message: "Can you transfer me to a real person?"
+  gold_escalate: true
+
+- id: esc-004
+  category: explicit-request
+  message: "I need a human, this bot isn't helping."
+  gold_escalate: true
+
+- id: esc-005
+  category: explicit-request
+  message: "Get me a supervisor now."
+  gold_escalate: true
+
+- id: esc-006
+  category: explicit-request
+  message: "I'd like to file a complaint about my order."
+  gold_escalate: true
+
+- id: esc-007
+  category: explicit-request
+  message: "Please escalate me to a representative."
+  gold_escalate: true
+
+# =============================================================================
+# STRONG FRUSTRATION (6) — matches _STRONG_FRUSTRATION_PATTERNS; rules pre-step.
+# =============================================================================
+
+- id: esc-008
+  category: strong-frustration
+  message: "This is absolutely unacceptable."
+  gold_escalate: true
+
+- id: esc-009
+  category: strong-frustration
+  message: "This is the worst service I have ever experienced."
+  gold_escalate: true
+
+- id: esc-010
+  category: strong-frustration
+  message: "I am absolutely furious about this."
+  gold_escalate: true
+
+- id: esc-011
+  category: strong-frustration
+  message: "This is useless."
+  gold_escalate: true
+
+- id: esc-012
+  category: strong-frustration
+  message: "I've had enough of this terrible support."
+  gold_escalate: true
+
+- id: esc-013
+  category: strong-frustration
+  message: "This is ridiculous, I've been waiting for weeks."
+  gold_escalate: true
+
+# =============================================================================
+# HIGH EMOTION (8) — angry/disgusted with NO handoff or strong-phrase keyword.
+# Rules-only MISSES these. The emotion model catches them only when anger >= 0.75
+# or disgust >= 0.70 (several land mid-strength and slip through); hybrid / qwen
+# recover the rest via the Qwen classifier.
+# =============================================================================
+
+- id: esc-014
+  category: high-emotion
+  message: "Are you kidding me right now?!"
+  gold_escalate: true
+
+- id: esc-015
+  category: high-emotion
+  message: "I cannot believe how badly this was handled."
+  gold_escalate: true
+
+- id: esc-016
+  category: high-emotion
+  message: "Why on earth would you charge me twice?!"
+  gold_escalate: true
+
+- id: esc-017
+  category: high-emotion
+  message: "This whole situation makes me so angry I could scream."
+  gold_escalate: true
+
+- id: esc-018
+  category: high-emotion
+  message: "I am so mad about what happened to my order."
+  gold_escalate: true
+
+- id: esc-019
+  category: high-emotion
+  message: "Honestly, I'm disgusted by how I've been treated."
+  gold_escalate: true
+
+- id: esc-020
+  category: high-emotion
+  message: "How dare you cancel my order without telling me?!"
+  gold_escalate: true
+
+- id: esc-021
+  category: high-emotion
+  message: "You've completely ruined my day with this mess."
+  gold_escalate: true
+
+# =============================================================================
+# TREND FRUSTRATION (6) — moderate wording + previous_streak: 1 so this turn
+# crosses streak >= 2. Most carry a repeated-problem keyword so even rules mode
+# escalates on the streak; the trend detector handles emotion/hybrid.
+# =============================================================================
+
+- id: esc-022
+  category: trend-frustration
+  message: "This is happening again."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-023
+  category: trend-frustration
+  message: "I'm contacting you about this issue again."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-024
+  category: trend-frustration
+  message: "This is the third time I'm reaching out."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-025
+  category: trend-frustration
+  message: "I've already contacted you about this twice."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-026
+  category: trend-frustration
+  message: "You keep failing to deliver my order."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-027
+  category: trend-frustration
+  message: "I've repeatedly asked for an update and heard nothing."
+  previous_streak: 1
+  gold_escalate: true
+
+# =============================================================================
+# CONTEXTUAL FRUSTRATION (5) — the latest message is mild on its own, but the
+# conversation context shows repeated, unresolved failure. previous_streak: 1
+# lets hybrid call Qwen. Qwen (context-aware) is the best detector here; rules and
+# emotion miss entirely, and even Qwen may miss the very mildest one-liners.
+# =============================================================================
+
+- id: esc-028
+  category: contextual-frustration
+  message: "Nothing has changed."
+  context:
+    - "I reported my missing parcel three days ago."
+    - "Your team promised a callback that never came."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-029
+  category: contextual-frustration
+  message: "I'm still waiting."
+  context:
+    - "My refund was supposed to arrive last week."
+    - "I was told it had already been processed two days ago."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-030
+  category: contextual-frustration
+  message: "So what happens now?"
+  context:
+    - "This is the fourth delivery attempt that has failed."
+    - "Every time I'm told it will be resolved and it isn't."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-031
+  category: contextual-frustration
+  message: "Is anyone actually going to help me?"
+  context:
+    - "I've explained my issue to three different bots."
+    - "None of them solved anything."
+  previous_streak: 1
+  gold_escalate: true
+
+- id: esc-032
+  category: contextual-frustration
+  message: "I don't know what else to do at this point."
+  context:
+    - "My account has been locked for a week."
+    - "I keep getting the same automated reply."
+  previous_streak: 1
+  gold_escalate: true
+
+# =============================================================================
+# CALM NEGATIVE (8) — a real problem stated calmly. The core distinction the
+# system is built for: a bad event is NOT frustration. Must NOT escalate.
+# =============================================================================
+
+- id: esc-033
+  category: calm-negative
+  message: "My package is delayed."
+  gold_escalate: false
+
+- id: esc-034
+  category: calm-negative
+  message: "I think my order was sent to the wrong address."
+  gold_escalate: false
+
+- id: esc-035
+  category: calm-negative
+  message: "My shipment hasn't arrived yet."
+  gold_escalate: false
+
+- id: esc-036
+  category: calm-negative
+  message: "The tracking page shows my parcel is stuck in transit."
+  gold_escalate: false
+
+- id: esc-037
+  category: calm-negative
+  message: "I noticed my delivery date moved to next week."
+  gold_escalate: false
+
+- id: esc-038
+  category: calm-negative
+  message: "One item from my order seems to be missing."
+  gold_escalate: false
+
+- id: esc-039
+  category: calm-negative
+  message: "My refund hasn't shown up in my account."
+  gold_escalate: false
+
+- id: esc-040
+  category: calm-negative
+  message: "The courier left a note but no package."
+  gold_escalate: false
+
+# =============================================================================
+# NORMAL QUERY (6) — ordinary support questions, no negativity. No escalation.
+# =============================================================================
+
+- id: esc-041
+  category: normal-query
+  message: "How do I track my order on NovaCart?"
+  gold_escalate: false
+
+- id: esc-042
+  category: normal-query
+  message: "What is your return policy?"
+  gold_escalate: false
+
+- id: esc-043
+  category: normal-query
+  message: "Can I change my delivery address?"
+  gold_escalate: false
+
+- id: esc-044
+  category: normal-query
+  message: "How long does standard shipping take?"
+  gold_escalate: false
+
+- id: esc-045
+  category: normal-query
+  message: "Do you ship to Saudi Arabia?"
+  gold_escalate: false
+
+- id: esc-046
+  category: normal-query
+  message: "What payment methods do you accept?"
+  gold_escalate: false
+
+# =============================================================================
+# POLITE (5) — thankful / positive / neutral. No escalation.
+# =============================================================================
+
+- id: esc-047
+  category: polite
+  message: "Thanks, that's really helpful!"
+  gold_escalate: false
+
+- id: esc-048
+  category: polite
+  message: "Great, I appreciate the quick response."
+  gold_escalate: false
+
+- id: esc-049
+  category: polite
+  message: "Perfect, that answers my question."
+  gold_escalate: false
+
+- id: esc-050
+  category: polite
+  message: "Thank you so much for sorting that out."
+  gold_escalate: false
+
+- id: esc-051
+  category: polite
+  message: "That makes sense, thanks for explaining."
+  gold_escalate: false
